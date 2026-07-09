@@ -16,3 +16,13 @@ jobs:
       - name: Run test suite
         shell: bash
         run: bash test/run-tests.sh
+      - name: PowerShell installer smoke test
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = Join-Path $env:RUNNER_TEMP "claude sp"
+          powershell -ExecutionPolicy Bypass -File install.ps1 -ClaudeDir $dir
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $s = Join-Path $dir "settings.json"
+          jq -e '(.hooks.PreCompact | length) == 1 and (.statusLine.command | endswith("statusline.sh\""))' $s
+          if ($LASTEXITCODE -ne 0) { exit 1 }

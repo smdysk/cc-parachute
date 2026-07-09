@@ -45,6 +45,10 @@ assert "statusline: cooldown suppresses marker" test ! -e "$BASE/markers/s2.warn
 OUT=$(sl_input 72 s3 | CC_PARACHUTE_THRESHOLD=80 bash "$HOOKS/statusline.sh")
 assert "statusline: custom threshold respected" test ! -e "$BASE/markers/s3.warn"
 
+printf '{"model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/p"},"context_window":{"used_percentage":90},"session_id":"../evil"}' \
+  | bash "$HOOKS/statusline.sh" >/dev/null
+assert "hardening: session id cannot escape the markers dir" test ! -e "$BASE/evil.warn"
+
 # --- userpromptsubmit-notify ----------------------------------------------
 UPS_IN='{"session_id":"s1","cwd":"/tmp/proj"}'
 OUT=$(printf '%s' "$UPS_IN" | bash "$HOOKS/userpromptsubmit-notify.sh")
@@ -105,10 +109,10 @@ assert "install: hooks copied" test -f "$CD/hooks/cc-parachute/statusline.sh"
 assert "install: skill copied" test -f "$CD/skills/compact-prep/SKILL.md"
 assert "install: settings is valid JSON" jq -e . "$S"
 assert "install: PreCompact wired" \
-  jq -e '.hooks.PreCompact[0].hooks[0].command | endswith("precompact-backup.sh")' "$S"
+  jq -e '.hooks.PreCompact[0].hooks[0].command | endswith("precompact-backup.sh\"")' "$S"
 assert "install: SessionStart matcher is compact" \
   jq -e '.hooks.SessionStart[0].matcher == "compact"' "$S"
-assert "install: statusline set" jq -e '.statusLine.command | endswith("statusline.sh")' "$S"
+assert "install: statusline set" jq -e '.statusLine.command | endswith("statusline.sh\"")' "$S"
 
 bash "$ROOT/install.sh" --claude-dir "$CD" >/dev/null
 assert "install: idempotent (no duplicate hooks)" \
@@ -125,6 +129,12 @@ printf '{"statusLine":{"type":"command","command":"my-own-statusline"}}' > "$CD3
 bash "$ROOT/install.sh" --claude-dir "$CD3" >/dev/null
 assert "install: existing statusline preserved" \
   jq -e '.statusLine.command == "my-own-statusline"' "$CD3/settings.json"
+
+CD4="$WORK/claude dir with spaces"
+bash "$ROOT/install.sh" --claude-dir "$CD4" >/dev/null
+SLCMD=$(jq -r '.statusLine.command' "$CD4/settings.json")
+OUT=$(sl_input 42.5 s9 | sh -c "$SLCMD")
+assert "install: generated command survives spaces in path" grep -q 'ctx 42%' <<<"$OUT"
 
 # --- summary ----------------------------------------------------------------
 echo ""

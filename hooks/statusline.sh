@@ -12,6 +12,8 @@ MODEL=$(printf '%s' "$INPUT" | jq -r '.model.display_name // .model.id // "?"' 2
 DIR=$(printf '%s' "$INPUT" | jq -r '.workspace.current_dir // .cwd // ""' 2>/dev/null)
 PCT=$(printf '%s' "$INPUT" | jq -r '.context_window.used_percentage // empty' 2>/dev/null)
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
+# Session ids become filenames; strip path separators and other risky chars.
+SID=$(printf '%s' "$SID" | tr -cd 'A-Za-z0-9._-' | head -c 128)
 
 THRESHOLD="${CC_PARACHUTE_THRESHOLD:-60}"
 [[ "$THRESHOLD" =~ ^[0-9]+$ ]] || THRESHOLD=60

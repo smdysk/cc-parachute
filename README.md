@@ -133,9 +133,11 @@ skepticism guardrails. The raw transcript backup is in
 `~/.claude/compact-state/transcripts/` if you need forensics.
 
 **Multiple sessions in the same folder?**
-The session pointer names the session that most recently submitted a prompt.
-The skill checks pointer freshness (2 minutes) and falls back to a
-folder-based state file name when in doubt — see the skill's hard gates.
+Not fully supported for state saving. The session pointer names whichever
+session most recently submitted a prompt; invoking `/compact-prep` refreshes
+it to your session, but another session prompting in those same seconds can
+still win the race, and the state file gets the wrong name. Prefer one
+session per folder when you intend to use `/compact-prep`.
 
 **Where does my data go?**
 Nowhere. Everything stays under `~/.claude/compact-state/` on your machine.
@@ -154,7 +156,7 @@ entries and statusline), then delete `~/.claude/hooks/cc-parachute/`,
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the design
 rules (fail-open, jq as the only dependency) and a list of good first issues.
-Run the test suite with `bash test/run-tests.sh` (37 checks, no network).
+Run the test suite with `bash test/run-tests.sh` (39 checks, no network).
 
 ## License
 

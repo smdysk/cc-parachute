@@ -11,4 +11,9 @@ Initial release.
 - `/compact-prep` skill with a fixed 9-section state file contract
 - Installers for bash (`install.sh`) and PowerShell (`install.ps1`),
   both idempotent with timestamped `settings.json` backups
-- Cross-platform test suite (37 checks), CI on Linux/macOS/Windows
+- Cross-platform test suite (39 checks), CI on Linux/macOS/Windows
+  including a PowerShell installer smoke test
+- Hardening from pre-release review: hook commands are quoted (survives
+  config paths with spaces), session ids are sanitized before filesystem
+  use, PowerShell installer treats `null` settings like absent ones, and
+  backup filenames are collision-proof

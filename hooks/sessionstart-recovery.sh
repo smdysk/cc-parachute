@@ -9,6 +9,8 @@ set -uo pipefail
 INPUT=$(cat)
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 CWD=$(printf '%s' "$INPUT" | jq -r '.cwd // empty' 2>/dev/null)
+# Session ids become filenames; strip path separators and other risky chars.
+SID=$(printf '%s' "$SID" | tr -cd 'A-Za-z0-9._-' | head -c 128)
 [[ -z "$CWD" ]] && CWD="$PWD"
 SLUG=$(printf '%s' "$CWD" | sed 's/[:\\/]/-/g')
 BASE="$HOME/.claude/compact-state"

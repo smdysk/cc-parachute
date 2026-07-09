@@ -34,23 +34,28 @@ Write-Host "Copied skill  -> $skillDst"
 if (-not (Test-Path $settingsPath)) {
     Set-Content -Path $settingsPath -Value "{}" -Encoding UTF8
 }
-$stamp = Get-Date -Format "yyyyMMdd-HHmmss"
+$stamp = "{0}-{1}" -f (Get-Date -Format "yyyyMMdd-HHmmss-fff"), $PID
 Copy-Item $settingsPath "$settingsPath.bak-$stamp"
 Write-Host "Backup        -> $settingsPath.bak-$stamp"
 
 $cfg = Get-Content $settingsPath -Raw -Encoding UTF8 | ConvertFrom-Json
 $cmdDir = $hookDst.Replace('\', '/')
 
+# Quote the script path inside the generated command: the Claude config dir
+# may contain spaces (e.g. C:/Users/Jane Doe/.claude).
 function New-HookEntry([string]$matcher, [string]$script) {
-    $hook = [pscustomobject]@{ type = "command"; command = "bash $cmdDir/$script" }
+    $hook = [pscustomobject]@{ type = "command"; command = "bash `"$cmdDir/$script`"" }
     if ($matcher -ne "") {
         return [pscustomobject]@{ matcher = $matcher; hooks = @($hook) }
     }
     return [pscustomobject]@{ hooks = @($hook) }
 }
 
+# Treat a literal null the same as absent (parity with install.sh's jq `//`).
 if (-not $cfg.PSObject.Properties["hooks"]) {
     $cfg | Add-Member -NotePropertyName hooks -NotePropertyValue ([pscustomobject]@{})
+} elseif ($null -eq $cfg.hooks) {
+    $cfg.hooks = [pscustomobject]@{}
 }
 
 function Add-HookEvent([string]$eventName, $entry) {
@@ -76,12 +81,16 @@ Add-HookEvent "SessionStart"     (New-HookEntry "compact" "sessionstart-recovery
 Add-HookEvent "UserPromptSubmit" (New-HookEntry ""        "userpromptsubmit-notify.sh")
 
 $statusLinePending = $false
+$hasStatusLine = $cfg.PSObject.Properties["statusLine"] -and ($null -ne $cfg.statusLine)
 if ($NoStatusLine) {
     Write-Host "statusLine : skipped (-NoStatusLine). Threshold warnings are off."
-} elseif (-not $cfg.PSObject.Properties["statusLine"]) {
-    $cfg | Add-Member -NotePropertyName statusLine -NotePropertyValue ([pscustomobject]@{
-        type = "command"; command = "bash $cmdDir/statusline.sh"
-    })
+} elseif (-not $hasStatusLine) {
+    $slValue = [pscustomobject]@{ type = "command"; command = "bash `"$cmdDir/statusline.sh`"" }
+    if ($cfg.PSObject.Properties["statusLine"]) {
+        $cfg.statusLine = $slValue
+    } else {
+        $cfg | Add-Member -NotePropertyName statusLine -NotePropertyValue $slValue
+    }
     Write-Host "statusLine : installed ([model] folder | ctx N%)"
 } else {
     Write-Host "statusLine : kept your existing statusline. To get the threshold warning, add the marker logic from hooks/statusline.sh to it." -ForegroundColor Yellow

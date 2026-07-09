@@ -54,10 +54,10 @@ Hard gates: never fabricate a session id (fall back to the cwd-slug name and
 say so), and never write secrets into state files — reference sensitive
 material by path.
 
-The pointer freshness check (2 minutes) handles two failure modes at once:
-hooks not installed, and two sessions racing in one folder. Stale pointer →
-slug-named state file → the recovery hook still finds it via its own slug
-fallback.
+The pointer freshness check (2 minutes) catches hooks that aren't installed
+and reduces — but cannot eliminate — same-folder races (see Failure modes).
+Stale pointer → slug-named state file → the recovery hook still finds it via
+its own slug fallback.
 
 ### precompact-backup.sh — insure
 
@@ -138,9 +138,13 @@ project trees means they can never end up in a commit.
 
 ## Failure modes, honestly
 
-- **Two sessions, one folder:** the pointer names the most recent prompter.
-  The skill's freshness check plus slug fallback bounds the damage to "state
-  file has a folder name instead of a session id".
+- **Two sessions, one folder:** not fully supported. The pointer names the
+  most recent prompter; invoking /compact-prep refreshes it to the invoking
+  session, which closes most of the window, but a concurrent prompt from the
+  other session in those same seconds can still misattribute the state file
+  (and the other session's recovery would then inject it). The skill cannot
+  verify its own session id — that limitation is inherent to the pointer
+  design. Prefer one session per folder when you intend to /compact-prep.
 - **State file > 8KB:** truncated at injection. The headings put the
   highest-value content (decisions, recovery notes) where truncation hits last
   in practice; still, keep state files terse.

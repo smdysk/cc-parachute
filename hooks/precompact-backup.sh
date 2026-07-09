@@ -13,6 +13,8 @@ INPUT=$(cat)
 SID=$(printf '%s' "$INPUT" | jq -r '.session_id // empty' 2>/dev/null)
 TRIGGER=$(printf '%s' "$INPUT" | jq -r '.trigger // .matcher // empty' 2>/dev/null)
 TRANSCRIPT=$(printf '%s' "$INPUT" | jq -r '.transcript_path // empty' 2>/dev/null)
+# Session ids become filenames; strip path separators and other risky chars.
+SID=$(printf '%s' "$SID" | tr -cd 'A-Za-z0-9._-' | head -c 128)
 [[ -z "$SID" ]] && exit 0
 
 BASE="$HOME/.claude/compact-state"

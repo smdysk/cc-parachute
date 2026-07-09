@@ -130,9 +130,11 @@ statusline警告と一度きりのリマインダーがあります（Claude側�
 `~/.claude/compact-state/transcripts/` にあります。
 
 **同じフォルダで複数セッションを並走させていたら?**
-セッションポインタは「最後にプロンプトを送ったセッション」を指します。
-スキルはポインタの鮮度（2分）を確認し、疑わしい場合はフォルダ名ベースの
-stateファイル名にフォールバックします。
+state保存については完全対応ではありません。ポインタは「最後にプロンプトを
+送ったセッション」を指します。`/compact-prep` の起動自体でポインタは自分に
+更新されますが、その数秒の間に別セッションがプロンプトを送るとレースに負け、
+stateファイルが別セッション名で保存されえます。`/compact-prep` を使う
+セッションはフォルダを分けるのが確実です。
 
 **データはどこへ行く?**
 どこへも。すべて手元の `~/.claude/compact-state/` 内に留まります。
@@ -151,7 +153,7 @@ statuslineを削除）→ `~/.claude/hooks/cc-parachute/`・
 
 歓迎します — 設計ルール（fail-open・依存はjqのみ）と good first issue の
 一覧は [CONTRIBUTING.md](CONTRIBUTING.md) へ。テストは
-`bash test/run-tests.sh`（37チェック・ネットワーク不要）。
+`bash test/run-tests.sh`（39チェック・ネットワーク不要）。
 
 ## ライセンス
 

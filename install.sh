@@ -41,18 +41,20 @@ if command -v cygpath >/dev/null 2>&1; then
 fi
 
 [[ -f "$SETTINGS" ]] || printf '{}\n' > "$SETTINGS"
-STAMP=$(date +%Y%m%d-%H%M%S)
+STAMP=$(date +%Y%m%d-%H%M%S)-$$
 cp "$SETTINGS" "$SETTINGS.bak-$STAMP"
 echo "Backup        -> $SETTINGS.bak-$STAMP"
 
 EXISTING_SL=$(jq -r '.statusLine.command // empty' "$SETTINGS")
 
+# Quote the script paths inside the generated commands: the Claude config
+# dir may contain spaces (e.g. C:/Users/Jane Doe/.claude).
 TMP=$(mktemp)
 jq \
-  --arg pre  "bash $CMD_DIR/precompact-backup.sh" \
-  --arg rec  "bash $CMD_DIR/sessionstart-recovery.sh" \
-  --arg note "bash $CMD_DIR/userpromptsubmit-notify.sh" \
-  --arg sl   "bash $CMD_DIR/statusline.sh" \
+  --arg pre  "bash \"$CMD_DIR/precompact-backup.sh\"" \
+  --arg rec  "bash \"$CMD_DIR/sessionstart-recovery.sh\"" \
+  --arg note "bash \"$CMD_DIR/userpromptsubmit-notify.sh\"" \
+  --arg sl   "bash \"$CMD_DIR/statusline.sh\"" \
   --argjson with_sl "$WITH_STATUSLINE" '
   .hooks = (.hooks // {})
   | .hooks.PreCompact = ((.hooks.PreCompact // []) as $l
@@ -72,7 +74,7 @@ mv "$TMP" "$SETTINGS"
 
 echo "Hooks wired   -> $SETTINGS"
 if [[ "$WITH_STATUSLINE" == "1" ]]; then
-  if [[ -n "$EXISTING_SL" && "$EXISTING_SL" != "bash $CMD_DIR/statusline.sh" ]]; then
+  if [[ -n "$EXISTING_SL" && "$EXISTING_SL" != "bash \"$CMD_DIR/statusline.sh\"" ]]; then
     echo "statusLine    -> kept your existing statusline. To get the threshold"
     echo "                 warning, add the marker logic from hooks/statusline.sh to it."
   else

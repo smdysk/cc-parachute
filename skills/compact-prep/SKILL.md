@@ -32,7 +32,9 @@ manually after compaction).
    - **Freshness check**: if the pointer is older than 2 minutes (hook not
      installed, or another session raced it), do not trust it — fall back and
      say so. With multiple sessions in the same folder, the pointer names the
-     session that most recently submitted a prompt.
+     session that most recently submitted a prompt — a concurrent prompt from
+     another session can misattribute the state file, so treat same-folder
+     parallel sessions as best-effort.
    - If the pointer is missing or stale: fall back to `<slug>.md` as the state
      file name and record `unknown` in the session field.
 2. Decide the destination: `~/.claude/compact-state/<session_id>.md`
