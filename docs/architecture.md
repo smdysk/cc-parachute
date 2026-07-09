@@ -121,12 +121,12 @@ session's own model. Anything automatic would be a second LLM call (see next
 question) or a heuristic dump that misses the point — decision structure lives
 in the session.
 
-**…call an LLM to write the state file (compact-plus's approach)?** It works,
-and if you want zero-touch state files you should use compact-plus. The
-trade-offs we chose against: per-compaction token cost, an API/subscription
-dependency, and a summarizer that reads the transcript secondhand instead of
-the session reporting firsthand. Both philosophies are legitimate; pick by
-taste.
+**…call an LLM to write the state file (compact-plus's approach)?** If you
+want zero-touch state files, that is exactly what compact-plus offers. The
+trade-offs we chose against for this project: per-compaction token cost, an
+API/subscription dependency, and a summarizer that reads the transcript
+secondhand instead of the session reporting firsthand. Both philosophies are
+legitimate; pick by taste.
 
 **…a daemon that watches usage continuously?** A daemon is a new failure
 domain (startup, crash, platform service management) to earn slightly earlier

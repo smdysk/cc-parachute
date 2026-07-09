@@ -114,9 +114,10 @@ credit where due. The difference is philosophy:
 | Footprint | 4 shell scripts + 1 skill | full plugin |
 | Windows | first-class, tested in CI | not documented |
 
-If you want a fully automatic, LLM-authored state file and plugin packaging,
-use compact-plus — it's good. If you want something you can read end-to-end,
-that costs nothing per compaction, and that works on Windows, you're home.
+Pick compact-plus if you want a fully automatic, LLM-authored state file and
+plugin packaging. Pick cc-parachute if you want something you can read
+end-to-end, that costs nothing per compaction, and that treats Windows as a
+first-class platform.
 
 ## FAQ
 
