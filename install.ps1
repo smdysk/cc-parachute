@@ -15,6 +15,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if (-not (Get-Command jq -ErrorAction SilentlyContinue)) {
+    Write-Host "cc-parachute requires jq (https://jqlang.org). Install it and re-run." -ForegroundColor Red
+    exit 1
+}
+
 $src = $PSScriptRoot
 $hookDst = Join-Path $ClaudeDir "hooks\cc-parachute"
 $skillDst = Join-Path $ClaudeDir "skills\compact-prep"

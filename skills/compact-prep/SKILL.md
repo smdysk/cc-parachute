@@ -67,8 +67,9 @@ manually after compaction).
    - Write Session Decisions as pairs: "Adopted: … / Rejected: … (reason: …)".
    - Recovery Notes is a letter to your post-compaction self: the next single
      step, things you must not do, promises awaiting verification.
-5. **Read the file back** and confirm all 9 headings exist (forcing function).
-   Fix any gaps before proceeding.
+5. **Read the file back** and confirm all 9 headings exist — the `#` title
+   plus the 8 `##` sections (forcing function). Fix any gaps before
+   proceeding.
 6. Completion receipt:
    - the state file path
    - what was saved, and what could not be saved (with reasons)

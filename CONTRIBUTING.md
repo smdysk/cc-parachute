@@ -37,7 +37,8 @@ If one of these appeals to you, open an issue to claim it first:
 2. **Localized injected messages** — `CC_PARACHUTE_LANG=ja` switching the
    recovery/reminder text (the model reads English fine; humans differ).
 3. **Configurable retention** — env vars for backup generations (now 5) and
-   prune days (now 7).
+   prune days (now 7); consider also pruning stale markers left by dead
+   sessions.
 4. **Configurable state directory** — env var overriding
    `~/.claude/compact-state`.
 5. **`npx` installer** — a thin npm wrapper so `npx cc-parachute` works.

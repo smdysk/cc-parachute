@@ -95,9 +95,10 @@ situation, and pretending otherwise is how sessions go off the rails.
            injected + renamed to .used by sessionstart-recovery
 ```
 
-Every marker is written by exactly one component and consumed by exactly one
-component. That's what keeps four independent processes coherent without a
-daemon.
+Every marker has exactly one writer and exactly one remover (the statusline
+additionally *reads* `.warned` to stay quiet during cooldown). That
+single-writer discipline is what keeps four independent processes coherent
+without a daemon.
 
 ## The skepticism guardrails
 

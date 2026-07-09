@@ -20,7 +20,7 @@ hooks and one skill**. No extra LLM calls, no API keys, no background processes.
 |---|---|---|
 | `statusline.sh` | continuously | `[Opus] myproject \| ctx 62% ⚠ /compact-prep` — context meter with threshold warning |
 | `userpromptsubmit-notify.sh` | every turn | one-shot nudge to run `/compact-prep` once usage crosses the threshold (default 60%) |
-| `/compact-prep` skill | you invoke it | saves a 9-section state file: decisions, rejections, constraints, the next step |
+| `/compact-prep` skill | you invoke it | saves a 9-heading state file: decisions, rejections, constraints, the next step |
 | `precompact-backup.sh` | at compaction | backs up the raw transcript (insurance against the lossy summary), flags auto-compacts |
 | `sessionstart-recovery.sh` | right after compaction | injects the state file plus skepticism guardrails into the fresh context |
 
