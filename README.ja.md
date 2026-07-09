@@ -9,17 +9,20 @@
 と合意していた手順を親切心で実行したりします。
 
 cc-parachute はそれを **小さなシェルフック4本とスキル1つ** で圧縮から守ります。
-追加のLLM呼び出しなし、APIキー不要、常駐プロセスなし。
+追加のLLM呼び出しなし、APIキー不要、常駐プロセスなし。自動化も込みです:
+使用率85%を超えるとセッション自身が自分のstateを保存するよう指示され、
+何も保存されないまま圧縮が来ても機械式の事実スナップショットが残ります——
+すべて追加コストゼロのまま。
 
 ## 構成
 
 | 部品 | 動くタイミング | 役割 |
 |---|---|---|
-| `statusline.sh` | 常時 | `[Opus] myproject \| ctx 62% ⚠ /compact-prep` — context使用率メーター＋閾値警告 |
-| `userpromptsubmit-notify.sh` | 毎ターン | 使用率が閾値（既定60%）を超えたら `/compact-prep` を一度だけ提案 |
-| `/compact-prep` スキル | 手動起動 | 9見出しのstateファイルを保存: 採用/却下と理由・制約・次の一手 |
-| `precompact-backup.sh` | 圧縮時 | rawトランスクリプトを退避（非可逆要約への保険）、auto-compactに印を付ける |
-| `sessionstart-recovery.sh` | 圧縮直後 | stateファイル＋懐疑ガードレールを新しいcontextへ注入 |
+| `statusline.sh` | 常時 | `[Opus] myproject \| ctx 62% ⚠ /compact-prep` — 使用率メーター。60%で警告、85%でauto-prep起動 |
+| `userpromptsubmit-notify.sh` | 毎ターン | 60%: `/compact-prep` を一度だけ提案。85%: セッション自身に「今すぐstateを書け」と指示 |
+| `/compact-prep` スキル | 手動起動（またはauto-prep経由） | 9見出しのstateファイルを保存: 採用/却下と理由・制約・次の一手 |
+| `precompact-backup.sh` | 圧縮時 | rawトランスクリプト退避、auto-compactに印、state未保存なら機械式の事実スナップショットを生成 |
+| `sessionstart-recovery.sh` | 圧縮直後 | 最良のstate（本命 > フォルダ名フォールバック > 機械式）＋懐疑ガードレールを注入 |
 
 ## インストール
 
@@ -53,19 +56,23 @@ statuslineは「表示」はできても「context注入」はできず、フッ
 
 ```
 statusline.sh（常時描画）
-   │  ctx ≥ 閾値 → markers/<sid>.warn を書く（クールダウン中はスキップ）
+   │  ctx ≥ 60% → markers/<sid>.warn     ctx ≥ 85% → markers/<sid>.autoprep
    ▼
 userpromptsubmit-notify.sh（次のプロンプト）
-   │  マーカーを消費 → 一度だけ "[COMPACT PREP REMINDER]" を注入
+   │  60%: 一度だけのリマインダー — 区切りで /compact-prep を提案
+   │  85%: 指示 — セッション自身が今すぐstateファイルを書いてから
+   │       ユーザーの依頼を続行（正確な保存先パスはフックが手渡す）
    ▼
-/compact-prep（作業の区切りで手動起動）
+/compact-prep（あなた、または auto-prep 指示）
    │  compact-state/<session>.md を書く — 判断・却下理由・次の一手
    ▼
-/compact 実行
-   │  precompact-backup.sh がrawトランスクリプト退避、autoなら印を付ける
+/compact 実行（または auto-compact 発火）
+   │  precompact-backup.sh がトランスクリプト退避、autoなら印、
+   │  state未保存なら <session>.auto.md（機械式の事実）を生成
    ▼
 sessionstart-recovery.sh（SessionStart, matcher "compact"）
-      stateファイル＋懐疑ガードレールを注入し、クールダウンをリセット
+      最良のstate（本命 > フォルダ名 > 機械式）＋懐疑ガードレールを注入し、
+      クールダウンをリセット
 ```
 
 stateファイルの9見出しはスキルと復旧フックの契約フォーマットです。
@@ -89,12 +96,14 @@ stateファイルの9見出しはスキルと復旧フックの契約フォー�
 
 ## 設計原則
 
-- **追加コストゼロ。** stateファイルはセッション自身がスキルに従って書く。
-  二次LLM呼び出しなし、APIキー不要、要約を要約するためのトークン消費なし。
+- **追加コストゼロ。** stateファイルはセッション自身がスキルに従って書く——
+  自動化層もこの原則のまま: 85%の指示は「セッション自身に書かせる」、圧縮時の
+  フォールバックは純シェル。二次LLM呼び出しなし、APIキー不要、
+  要約を要約するためのトークン消費なし。
 - **fail-open。** 全フックは何があっても exit 0。マーカー破損やファイル欠落は
   「警告が出ない」に劣化するだけで、セッションを止めることはない。
-- **監査可能。** 4スクリプト合計 約160行のbash。`settings.json` に触らせる前に
-  5分で全部読める（バックアップも取る）。
+- **監査可能。** 4スクリプト合計 約270行のbash。`settings.json` に触らせる前に
+  10分で全部読める（バックアップも取る）。
 - **Windowsが一級市民。** Windows 11 + Git Bash で開発・実戦運用。
   CIは Linux / macOS / Windows で全テストを回す。
 
@@ -108,26 +117,29 @@ stateファイルの9見出しはスキルと復旧フックの契約フォー�
 |---|---|---|
 | stateファイルの書き手 | 自分のセッション（スキル誘導） | 別のLLM呼び出し（Claude/Codexバックエンド） |
 | 圧縮ごとのコスト | 追加トークンなし | LLM要約1回分 |
+| 準備なしのauto-compact | 85%でauto-prep指示＋圧縮時の機械式スナップショット | LLM生成state |
 | フットプリント | シェル4本＋スキル1つ | フルプラグイン |
 | Windows | 一級対応・CIで検証 | 記載なし |
 
-全自動のLLM生成stateファイルとプラグイン形式なら compact-plus を、
-端から端まで読める・圧縮ごとの追加コストゼロ・Windows一級対応なら
-cc-parachute を選んでください。
+トランスクリプト全体のLLM生成サマリーとプラグイン形式なら compact-plus を、
+セッション自身が書く一次情報のstate・auto-compactの自動カバー・追加トークン
+ゼロ・Windows一級対応なら cc-parachute を選んでください。
 
 ## FAQ
 
 **`/compact-prep` は手動なの?**
-はい、設計上そうです。「何が重要だったか」を一番知っているのは圧縮直前の
-セッション自身であり、外部のサブプロセスではないからです。見逃さないように
-statusline警告と一度きりのリマインダーがあります（Claude側にも「区切りで
-提案せよ」と伝わります）。
+いいえ——3層でカバーされます。60%で提案、85%でセッション自身が即座に
+stateファイルを書くよう指示（追加呼び出しゼロのまま。フックが正確な保存先
+パスを手渡します）、それでも何も保存されないまま圧縮が来たらPreCompactフックが
+機械式スナップショットを残します。とはいえ、作業の区切りで意図的に打つ
+`/compact-prep` が最良のstateを生みます——自動化層は理想でなくセーフティネットです。
 
-**/compact-prep を忘れて圧縮された場合は?**
-復旧フックはそれでも動きます。「state無しの圧縮」であることを明示し、
-タスクリストや直近の編集ファイルから現在地を再構築するよう指示し、懐疑
-ガードレールを適用します。rawトランスクリプトの退避は
-`~/.claude/compact-state/transcripts/` にあります。
+**何も保存されないまま圧縮された場合は?**
+機械式スナップショット（git status・直近の発言・触ったファイル）が
+「事実のみ」ラベル付きで注入され、懐疑ガードレールが適用されます。raw
+トランスクリプトの退避は `~/.claude/compact-state/transcripts/` に。
+どのフォールバックでも救えないのは「書き残されなかった判断構造」で、
+それを防ぐのが85%指示の役割です。
 
 **同じフォルダで複数セッションを並走させていたら?**
 state保存については完全対応ではありません。ポインタは「最後にプロンプトを
@@ -141,8 +153,9 @@ stateファイルが別セッション名で保存されえます。`/compact-pr
 退避は自動ローテーション（セッションごと5世代・7日）。スキルには
 「stateファイルに秘密情報を書かない」ハードゲートがあります。
 
-**警告の閾値を変えたい**
-Claude Code を起動する環境で `CC_PARACHUTE_THRESHOLD`（既定60）を設定。
+**閾値を変えたい**
+Claude Code を起動する環境で `CC_PARACHUTE_THRESHOLD`（既定60、提案）と
+`CC_PARACHUTE_AUTOPREP_THRESHOLD`（既定85、即時保存指示）を設定。
 
 **アンインストール**
 `settings.json` のバックアップを書き戻す（またはフック3エントリと
@@ -153,7 +166,7 @@ statuslineを削除）→ `~/.claude/hooks/cc-parachute/`・
 
 歓迎します — 設計ルール（fail-open・依存はjqのみ）と good first issue の
 一覧は [CONTRIBUTING.md](CONTRIBUTING.md) へ。テストは
-`bash test/run-tests.sh`（39チェック・ネットワーク不要）。
+`bash test/run-tests.sh`（54チェック・ネットワーク不要）。
 
 ## ライセンス
 

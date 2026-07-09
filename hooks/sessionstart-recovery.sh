@@ -2,6 +2,8 @@
 # cc-parachute SessionStart hook (matcher: "compact"): injects recovery
 # instructions into the fresh post-compaction context. SessionStart stdout is
 # appended to the context directly, so no marker relay is needed here.
+# State priority: /compact-prep file (session id) > cwd-slug fallback >
+# mechanical precompact snapshot (<sid>.auto.md).
 # Fail-open: always exit 0 (never block the session).
 
 set -uo pipefail
@@ -16,8 +18,13 @@ SLUG=$(printf '%s' "$CWD" | sed 's/[:\\/]/-/g')
 BASE="$HOME/.claude/compact-state"
 
 STATE=""
+KIND="prep"
 [[ -n "$SID" && -f "$BASE/$SID.md" ]] && STATE="$BASE/$SID.md"
 [[ -z "$STATE" && -f "$BASE/$SLUG.md" ]] && STATE="$BASE/$SLUG.md"
+if [[ -z "$STATE" && -n "$SID" && -f "$BASE/$SID.auto.md" ]]; then
+  STATE="$BASE/$SID.auto.md"
+  KIND="auto"
+fi
 
 # Consume the "this was an auto-compact" marker left by the PreCompact hook.
 AUTO=""
@@ -25,13 +32,20 @@ if [[ -n "$SID" && -f "$BASE/markers/$SID.autocompact" ]]; then
   AUTO=1
   rm -f "$BASE/markers/$SID.autocompact" 2>/dev/null || true
 fi
-# Reset the threshold-warning cooldown so the next crossing can notify again.
+# Reset the threshold cooldowns so the next crossing can notify again.
 if [[ -n "$SID" ]]; then
-  rm -f "$BASE/markers/$SID.warned" "$BASE/markers/$SID.warn" 2>/dev/null || true
+  rm -f "$BASE/markers/$SID.warned" "$BASE/markers/$SID.warn" \
+        "$BASE/markers/$SID.autoprepped" "$BASE/markers/$SID.autoprep" 2>/dev/null || true
 fi
 
 echo "[COMPACTION RECOVERY] Context compaction has occurred. Do the following before resuming work."
-if [[ -n "$STATE" ]]; then
+if [[ -n "$STATE" && "$KIND" == "auto" ]]; then
+  echo "- No /compact-prep was run before this compaction. Below is a MECHANICAL snapshot taken at compaction time: git/file/message facts only. Decisions, rejections, and next steps are NOT in it - treat them as unknown and re-establish them before acting."
+  echo '```'
+  head -c 8000 "$STATE"
+  echo '```'
+  mv "$STATE" "$STATE.used" 2>/dev/null || true
+elif [[ -n "$STATE" ]]; then
   MOD=$(stat -c %Y "$STATE" 2>/dev/null || stat -f %m "$STATE" 2>/dev/null || echo "")
   if [[ -n "$MOD" ]]; then
     NOW=$(date +%s)
@@ -43,10 +57,10 @@ if [[ -n "$STATE" ]]; then
   head -c 8000 "$STATE"
   echo '```'
   mv "$STATE" "$STATE.used" 2>/dev/null || true
-  find "$BASE" -maxdepth 1 -name "*.used" -mtime +7 -delete 2>/dev/null || true
 else
   echo "- No state file was found (this compaction happened without /compact-prep). Rebuild your bearings from the task list, memory files, and recently edited files. Confirm anything uncertain with the user before acting on it."
 fi
+find "$BASE" -maxdepth 1 -name "*.used" -mtime +7 -delete 2>/dev/null || true
 if [[ -n "$AUTO" ]]; then
   echo "- This was an AUTO-compact. Be especially skeptical of decisions, rejection reasons, and phase assessments stated in the compaction summary."
 fi

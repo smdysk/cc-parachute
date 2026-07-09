@@ -13,16 +13,19 @@ after a compaction, your agent re-proposes the idea you killed an hour ago, or
 
 cc-parachute preserves that structure across compaction with **four small shell
 hooks and one skill**. No extra LLM calls, no API keys, no background processes.
+Automation included: past 85% usage the session is directed to save its own
+state, and a compaction that arrives with nothing saved still gets a
+mechanical facts snapshot — all of it still zero extra calls.
 
 ## What you get
 
 | Piece | When it runs | What it does |
 |---|---|---|
-| `statusline.sh` | continuously | `[Opus] myproject \| ctx 62% ⚠ /compact-prep` — context meter with threshold warning |
-| `userpromptsubmit-notify.sh` | every turn | one-shot nudge to run `/compact-prep` once usage crosses the threshold (default 60%) |
-| `/compact-prep` skill | you invoke it | saves a 9-heading state file: decisions, rejections, constraints, the next step |
-| `precompact-backup.sh` | at compaction | backs up the raw transcript (insurance against the lossy summary), flags auto-compacts |
-| `sessionstart-recovery.sh` | right after compaction | injects the state file plus skepticism guardrails into the fresh context |
+| `statusline.sh` | continuously | `[Opus] myproject \| ctx 62% ⚠ /compact-prep` — context meter; warns at 60%, arms auto-prep at 85% |
+| `userpromptsubmit-notify.sh` | every turn | at 60%: one-shot nudge to run `/compact-prep`; at 85%: directs the session to save its own state file immediately |
+| `/compact-prep` skill | you invoke it (or auto-prep does) | saves a 9-heading state file: decisions, rejections, constraints, the next step |
+| `precompact-backup.sh` | at compaction | backs up the raw transcript, flags auto-compacts, and writes a mechanical facts-only snapshot if no state was saved |
+| `sessionstart-recovery.sh` | right after compaction | injects the best available state (prep > folder fallback > mechanical) plus skepticism guardrails |
 
 ## Install
 
@@ -55,19 +58,23 @@ so the pieces talk through tiny marker files (a marker relay):
 
 ```
 statusline.sh (renders continuously)
-   │  ctx ≥ threshold → write markers/<sid>.warn   (skipped while in cooldown)
+   │  ctx ≥ 60% → markers/<sid>.warn        ctx ≥ 85% → markers/<sid>.autoprep
    ▼
 userpromptsubmit-notify.sh (next prompt)
-   │  consumes the marker → injects a one-shot "[COMPACT PREP REMINDER]"
+   │  60%: one-shot reminder — suggest /compact-prep at a natural break
+   │  85%: directive — the session writes its own state file NOW, then
+   │       continues the user's request (exact path supplied by the hook)
    ▼
-/compact-prep (you invoke it at a natural break)
+/compact-prep (you, or the auto-prep directive)
    │  writes compact-state/<session>.md — decisions, rejections, next step
    ▼
-you run /compact
-   │  precompact-backup.sh backs up the raw transcript, flags "auto" compacts
+you run /compact (or auto-compact fires)
+   │  precompact-backup.sh backs up the raw transcript, flags "auto" compacts,
+   │  and writes <session>.auto.md (mechanical facts) if no state exists
    ▼
 sessionstart-recovery.sh (SessionStart, matcher "compact")
-      injects the state file + skepticism guardrails, resets the cooldown
+      injects the best available state (prep > folder fallback > mechanical)
+      + skepticism guardrails, resets the cooldowns
 ```
 
 The state file's 9 headings are a fixed contract between the skill and the
@@ -92,11 +99,13 @@ model *confidently acting on a summary that dropped the reasons*.
 
 ## Design principles
 
-- **Zero extra cost.** Your session writes its own state file via the skill.
+- **Zero extra cost.** Your session writes its own state file via the skill —
+  and the automatic layers keep it that way: the 85% directive has the session
+  write its own state, and the compaction-time fallback is pure shell.
   No secondary LLM call, no API key, no tokens spent on summarizing the summary.
 - **Fail-open.** Every hook exits 0 no matter what. A broken marker or missing
   file degrades to "no warning", never to a blocked session.
-- **Auditable.** ~160 lines of bash across four scripts. Read all of it in five
+- **Auditable.** ~270 lines of bash across four scripts. Read all of it in ten
   minutes before letting it near your `settings.json` (which is backed up anyway).
 - **Windows is first-class.** Developed and battle-tested on Windows 11 +
   Git Bash; CI runs the full suite on Linux, macOS, and Windows.
@@ -111,27 +120,32 @@ credit where due. The difference is philosophy:
 |---|---|---|
 | State file author | your own session, guided by a skill | a separate LLM call (Claude/Codex backend) |
 | Cost per compaction | zero extra tokens | one LLM summarization call |
+| Unprepped auto-compact | auto-prep directive at 85% + mechanical snapshot at compaction | LLM state file |
 | Footprint | 4 shell scripts + 1 skill | full plugin |
 | Windows | first-class, tested in CI | not documented |
 
-Pick compact-plus if you want a fully automatic, LLM-authored state file and
-plugin packaging. Pick cc-parachute if you want something you can read
-end-to-end, that costs nothing per compaction, and that treats Windows as a
-first-class platform.
+Pick compact-plus if you want an LLM-written summary of the full transcript
+and plugin packaging. Pick cc-parachute if you want first-hand state written
+by the session itself, automatic coverage of auto-compacts at zero token
+cost, and Windows as a first-class platform.
 
 ## FAQ
 
 **Do I have to run /compact-prep manually?**
-Yes, by design. The moment *before* compaction is exactly when the session
-knows what mattered; a scheduled subprocess doesn't. The statusline warning and
-the one-shot reminder exist so you never miss the window. (The reminder also
-nudges Claude to suggest it at a natural break.)
+No — three layers cover it. At 60% you get a nudge; at 85% the session is
+directed to write its own state file immediately (still zero extra calls —
+your session does the writing, and the hook hands it the exact file path); and
+if compaction arrives with nothing saved, the PreCompact hook writes a
+mechanical snapshot. A deliberate `/compact-prep` at a natural break still
+produces the best state file — the automatic layers are the safety net, not
+the ideal.
 
-**What if I never ran /compact-prep and compaction hit anyway?**
-The recovery hook still fires: it says so explicitly, tells the fresh context
-to rebuild its bearings from the task list and recent files, and applies the
-skepticism guardrails. The raw transcript backup is in
-`~/.claude/compact-state/transcripts/` if you need forensics.
+**What if compaction hits and nothing was saved?**
+The mechanical snapshot (git status, recent messages, touched files) is
+injected with a clear facts-only label, the skepticism guardrails apply, and
+the raw transcript backup is in `~/.claude/compact-state/transcripts/` if you
+need forensics. What no fallback can recover is decision structure that was
+never written down — that is what the 85% directive exists to prevent.
 
 **Multiple sessions in the same folder?**
 Not fully supported for state saving. The session pointer names whichever
@@ -145,8 +159,10 @@ Nowhere. Everything stays under `~/.claude/compact-state/` on your machine.
 Backups rotate (5 per session, 7 days). The skill is instructed never to write
 secrets into state files.
 
-**Change the warning threshold?**
-Set `CC_PARACHUTE_THRESHOLD` (default 60) in the environment Claude Code runs in.
+**Change the thresholds?**
+Set `CC_PARACHUTE_THRESHOLD` (default 60, the nudge) and
+`CC_PARACHUTE_AUTOPREP_THRESHOLD` (default 85, the save-now directive) in the
+environment Claude Code runs in.
 
 **Uninstall?**
 Restore the timestamped `settings.json` backup (or remove the three hook
@@ -157,7 +173,7 @@ entries and statusline), then delete `~/.claude/hooks/cc-parachute/`,
 
 Contributions welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for the design
 rules (fail-open, jq as the only dependency) and a list of good first issues.
-Run the test suite with `bash test/run-tests.sh` (39 checks, no network).
+Run the test suite with `bash test/run-tests.sh` (54 checks, no network).
 
 ## License
 

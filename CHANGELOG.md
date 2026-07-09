@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 — 2026-07-10
+
+Zero-cost automation: unprepped auto-compacts are now covered.
+
+- Auto-prep: second statusline threshold (`CC_PARACHUTE_AUTOPREP_THRESHOLD`,
+  default 85). Past it, the prompt hook injects a directive and the session
+  writes its own state file — the hook supplies the exact file path, so this
+  path has no pointer lookup and no same-folder race
+- Mechanical fallback snapshot: if compaction arrives with no state saved,
+  the PreCompact hook writes `<sid>.auto.md` (git status, recent user
+  messages, recently edited files — jq and git only) and recovery injects it
+  with a facts-only label
+- Recovery priority: prep state > folder fallback > mechanical snapshot
+- Test suite: 39 → 54 checks
+
 ## 0.1.0 — 2026-07-10
 
 Initial release.

@@ -24,6 +24,8 @@ manually after compaction).
 ## Steps
 
 1. **Resolve the session_id.**
+   - If an injected `[COMPACT PREP - ACT NOW]` directive already gave you the
+     exact state file path, use that path and skip the rest of this step.
    - Slugify the cwd: replace every `:`, `/`, and `\` with `-`
      (e.g. `C:\Users\you\work` → `C--Users-you-work`, `/home/you/proj` → `-home-you-proj`).
    - Read `~/.claude/compact-state/current-session-<slug>` — a pointer file

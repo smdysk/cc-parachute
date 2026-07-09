@@ -21,7 +21,7 @@ and the bar for making the existing surface better is low.
 ## Dev loop
 
 ```bash
-bash test/run-tests.sh        # 39 checks, no network, throwaway HOME
+bash test/run-tests.sh        # 54 checks, no network, throwaway HOME
 bash -n hooks/*.sh install.sh # quick syntax pass
 ```
 
