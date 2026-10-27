@@ -23,6 +23,9 @@ assert() { local name=$1; shift; if "$@" >/dev/null 2>&1; then ok "$name"; else 
 sl_input() { # $1=pct $2=sid
   printf '{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp/proj"},"context_window":{"used_percentage":%s},"session_id":"%s"}' "$1" "$2"
 }
+sl_tok() { # $1=pct $2=total_input_tokens $3=sid  (1M-window style input)
+  printf '{"model":{"display_name":"TestModel"},"workspace":{"current_dir":"/tmp/proj"},"context_window":{"used_percentage":%s,"total_input_tokens":%s,"context_window_size":1000000},"session_id":"%s"}' "$1" "$2" "$3"
+}
 
 # --- syntax ---------------------------------------------------------------
 for f in "$HOOKS"/*.sh "$ROOT/install.sh" "$ROOT/test/run-tests.sh"; do
@@ -46,7 +49,7 @@ OUT=$(sl_input 72 s3 | CC_PARACHUTE_THRESHOLD=80 bash "$HOOKS/statusline.sh")
 assert "statusline: custom threshold respected" test ! -e "$BASE/markers/s3.warn"
 
 OUT=$(sl_input 91.2 s10 | bash "$HOOKS/statusline.sh")
-assert "statusline: autoprep tier shows double warning" grep -q 'saving state next turn' <<<"$OUT"
+assert "statusline: autoprep tier shows double warning" grep -q 'saving state' <<<"$OUT"
 assert "statusline: autoprep marker written" grep -q '^91$' "$BASE/markers/s10.autoprep"
 assert "statusline: autoprep tier suppresses warn marker" test ! -e "$BASE/markers/s10.warn"
 
@@ -57,6 +60,31 @@ assert "statusline: autoprep cooldown suppresses marker" test ! -e "$BASE/marker
 OUT=$(sl_input 90 s12 | CC_PARACHUTE_AUTOPREP_THRESHOLD=95 bash "$HOOKS/statusline.sh")
 assert "statusline: custom autoprep threshold falls back to warn tier" \
   bash -c 'test ! -e "$1/markers/s12.autoprep" && test -e "$1/markers/s12.warn"' _ "$BASE"
+
+OUT=$(sl_tok 18 176137 t1 | bash "$HOOKS/statusline.sh")
+assert "tokens: meter shows token count" grep -q 'ctx 18% 176k' <<<"$OUT"
+assert "tokens: warn tier fires on tokens at low percent" grep -q '^tokens=176137$' "$BASE/markers/t1.warn"
+assert "tokens: warn tier does not arm autoprep" test ! -e "$BASE/markers/t1.autoprep"
+
+sl_tok 19 190000 t2 | bash "$HOOKS/statusline.sh" >/dev/null
+assert "tokens: autoprep tier fires on tokens at low percent" grep -q '^tokens=190000$' "$BASE/markers/t2.autoprep"
+
+sl_tok 10 100000 t3 | bash "$HOOKS/statusline.sh" >/dev/null
+assert "tokens: below both thresholds leaves no marker"   bash -c 'test ! -e "$1/markers/t3.warn" && test ! -e "$1/markers/t3.autoprep"' _ "$BASE"
+
+sl_tok 19 190000 t4 | CC_PARACHUTE_AUTOPREP_TOKENS=250000 CC_PARACHUTE_WARN_TOKENS=200000 bash "$HOOKS/statusline.sh" >/dev/null
+assert "tokens: custom token thresholds respected"   bash -c 'test ! -e "$1/markers/t4.warn" && test ! -e "$1/markers/t4.autoprep"' _ "$BASE"
+
+printf 'at=1
+tokens=190000
+' > "$BASE/markers/t5.autoprepped"
+sl_tok 25 250000 t5 | bash "$HOOKS/statusline.sh" >/dev/null
+assert "rearm: cooldown holds before the rearm distance" test ! -e "$BASE/markers/t5.autoprep"
+sl_tok 35 345000 t5 | bash "$HOOKS/statusline.sh" >/dev/null
+assert "rearm: directive armed again after the rearm distance" grep -q '^tokens=345000$' "$BASE/markers/t5.autoprep"
+
+printf '{"model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/p"},"context_window":{"current_usage":{"input_tokens":2,"cache_creation_input_tokens":1000,"cache_read_input_tokens":199000}},"session_id":"t6"}'   | bash "$HOOKS/statusline.sh" >/dev/null
+assert "tokens: falls back to current_usage when totals are absent" grep -q '^tokens=200002$' "$BASE/markers/t6.autoprep"
 
 printf '{"model":{"display_name":"M"},"workspace":{"current_dir":"/tmp/p"},"context_window":{"used_percentage":90},"session_id":"../evil"}' \
   | bash "$HOOKS/statusline.sh" >/dev/null
@@ -87,6 +115,21 @@ echo 65 > "$BASE/markers/s13.warn"
 OUT=$(printf '{"session_id":"s13","cwd":"/tmp/proj"}' | bash "$HOOKS/userpromptsubmit-notify.sh")
 assert "notify: autoprep outranks warn and clears it" \
   bash -c 'printf "%s" "$1" | grep -q "ACT NOW" && test ! -e "$2/markers/s13.warn"' _ "$OUT" "$BASE"
+
+# --- stop-autoprep -----------------------------------------------------------
+OUT=$(printf '{"session_id":"t2","stop_hook_active":false}' | bash "$HOOKS/stop-autoprep.sh")
+assert "stop: blocks with the save directive when armed"   bash -c 'printf "%s" "$1" | jq -e ".decision == \"block\" and (.reason | contains(\"ACT NOW\") and contains(\"t2.md\") and contains(\"190000\"))"' _ "$OUT"
+assert "stop: marker consumed" test ! -e "$BASE/markers/t2.autoprep"
+assert "stop: cooldown records the token count" grep -q '^tokens=190000$' "$BASE/markers/t2.autoprepped"
+
+OUT=$(printf '{"session_id":"t2","stop_hook_active":false}' | bash "$HOOKS/stop-autoprep.sh")
+assert "stop: silent when nothing is armed" test -z "$OUT"
+
+printf '90
+tokens=190000
+' > "$BASE/markers/t7.autoprep"
+OUT=$(printf '{"session_id":"t7","stop_hook_active":true}' | bash "$HOOKS/stop-autoprep.sh")
+assert "stop: never blocks while already continuing"   bash -c 'test -z "$1" && test -e "$2/markers/t7.autoprep"' _ "$OUT" "$BASE"
 
 # --- precompact-backup ------------------------------------------------------
 TRANSCRIPT="$WORK/transcript.jsonl"
@@ -164,11 +207,13 @@ assert "install: PreCompact wired" \
   jq -e '.hooks.PreCompact[0].hooks[0].command | endswith("precompact-backup.sh\"")' "$S"
 assert "install: SessionStart matcher is compact" \
   jq -e '.hooks.SessionStart[0].matcher == "compact"' "$S"
+assert "install: Stop wired"   jq -e '.hooks.Stop[0].hooks[0].command | endswith("stop-autoprep.sh\"")' "$S"
+assert "install: shared helper copied" test -f "$CD/hooks/cc-parachute/autoprep-lib.sh"
 assert "install: statusline set" jq -e '.statusLine.command | endswith("statusline.sh\"")' "$S"
 
 bash "$ROOT/install.sh" --claude-dir "$CD" >/dev/null
 assert "install: idempotent (no duplicate hooks)" \
-  jq -e '(.hooks.PreCompact | length) == 1 and (.hooks.UserPromptSubmit | length) == 1' "$S"
+  jq -e '(.hooks.PreCompact | length) == 1 and (.hooks.UserPromptSubmit | length) == 1 and (.hooks.Stop | length) == 1' "$S"
 
 CD2="$WORK/claude2"
 bash "$ROOT/install.sh" --claude-dir "$CD2" --no-statusline >/dev/null

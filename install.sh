@@ -53,7 +53,7 @@ TMP=$(mktemp)
 jq \
   --arg pre  "bash \"$CMD_DIR/precompact-backup.sh\"" \
   --arg rec  "bash \"$CMD_DIR/sessionstart-recovery.sh\"" \
-  --arg note "bash \"$CMD_DIR/userpromptsubmit-notify.sh\"" \
+  --arg note "bash \"$CMD_DIR/userpromptsubmit-notify.sh\""   --arg stop "bash \"$CMD_DIR/stop-autoprep.sh\"" \
   --arg sl   "bash \"$CMD_DIR/statusline.sh\"" \
   --argjson with_sl "$WITH_STATUSLINE" '
   .hooks = (.hooks // {})
@@ -66,6 +66,9 @@ jq \
   | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) as $l
       | if [$l[] | (.hooks // [])[] | .command] | index($note) then $l
         else $l + [{hooks: [{type: "command", command: $note}]}] end)
+  | .hooks.Stop = ((.hooks.Stop // []) as $l
+      | if [$l[] | (.hooks // [])[] | .command] | index($stop) then $l
+        else $l + [{hooks: [{type: "command", command: $stop}]}] end)
   | if $with_sl == 1 and .statusLine == null
     then .statusLine = {type: "command", command: $sl}
     else . end
@@ -78,7 +81,7 @@ if [[ "$WITH_STATUSLINE" == "1" ]]; then
     echo "statusLine    -> kept your existing statusline. To get the threshold"
     echo "                 warning, add the marker logic from hooks/statusline.sh to it."
   else
-    echo "statusLine    -> installed ([model] folder | ctx N%)"
+    echo "statusLine    -> installed ([model] folder | ctx N% Nk)"
   fi
 else
   echo "statusLine    -> skipped (--no-statusline). Threshold warnings are off."

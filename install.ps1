@@ -79,6 +79,7 @@ Write-Host "Wiring hooks:"
 Add-HookEvent "PreCompact"       (New-HookEntry ""        "precompact-backup.sh")
 Add-HookEvent "SessionStart"     (New-HookEntry "compact" "sessionstart-recovery.sh")
 Add-HookEvent "UserPromptSubmit" (New-HookEntry ""        "userpromptsubmit-notify.sh")
+Add-HookEvent "Stop"             (New-HookEntry ""        "stop-autoprep.sh")
 
 $statusLinePending = $false
 $hasStatusLine = $cfg.PSObject.Properties["statusLine"] -and ($null -ne $cfg.statusLine)
@@ -91,7 +92,7 @@ if ($NoStatusLine) {
     } else {
         $cfg | Add-Member -NotePropertyName statusLine -NotePropertyValue $slValue
     }
-    Write-Host "statusLine : installed ([model] folder | ctx N%)"
+    Write-Host "statusLine : installed ([model] folder | ctx N% Nk)"
 } else {
     Write-Host "statusLine : kept your existing statusline. To get the threshold warning, add the marker logic from hooks/statusline.sh to it." -ForegroundColor Yellow
     $statusLinePending = $true

@@ -25,13 +25,30 @@ hook *restores* it into the replacement context.
 
 ### statusline.sh — detect
 
-Renders `[model] folder | ctx N%`. Two tiers: at
-`N ≥ CC_PARACHUTE_THRESHOLD` (default 60) it appends `⚠ /compact-prep` and
-writes `markers/<sid>.warn`; at `N ≥ CC_PARACHUTE_AUTOPREP_THRESHOLD`
-(default 85) it appends `⚠⚠ saving state next turn` and writes
-`markers/<sid>.autoprep` instead. Each tier has its own cooldown marker
+Renders `[model] folder | ctx N% Tk`. Two tiers, each reached on whichever
+comes first, percent or absolute tokens (`context_window.total_input_tokens`,
+falling back to the sum of `current_usage`): the warn tier at 60% /
+`CC_PARACHUTE_WARN_TOKENS` (150000) appends `⚠ /compact-prep` and writes
+`markers/<sid>.warn`; the autoprep tier at 85% /
+`CC_PARACHUTE_AUTOPREP_TOKENS` (180000) appends `⚠⚠ saving state` and writes
+`markers/<sid>.autoprep` instead. Markers hold the percent on the first line
+and `tokens=N` on the second. Each tier has its own cooldown marker
 (`.warned` / `.autoprepped`), so each fires once per crossing — statuslines
-render often, and the guard keeps that from becoming marker spam.
+render often, and the guard keeps that from becoming marker spam. The
+autoprep cooldown stores the token count at the save; once usage grows by
+`CC_PARACHUTE_REARM_TOKENS` (150000) past it, the tier arms again.
+
+Token thresholds exist because on 1M-token windows `used_percentage` is
+measured against the whole window, while compaction (idle compaction from
+about 200k tokens, or the auto-compact window) runs far earlier.
+
+### stop-autoprep.sh — save before going idle
+
+If `.autoprep` is armed when the turn ends, it consumes it and returns
+`{"decision":"block"}` with the save-state directive, so the session writes
+its state file before it goes idle. It never blocks when `stop_hook_active`
+is true. The directive text and the marker bookkeeping live in
+`autoprep-lib.sh`, shared with the prompt hook.
 
 ### userpromptsubmit-notify.sh — nudge, direct (and point)
 
@@ -98,14 +115,16 @@ situation, and pretending otherwise is how sessions go off the rails.
 ## Marker lifecycle
 
 ```
-.warn      created by statusline at the 60% threshold (if no .warned)
+.warn      created by statusline at the warn tier (if no .warned)
            consumed by userpromptsubmit-notify → injects reminder, writes .warned
 .warned    cooldown; suppresses further .warn writes
            deleted by sessionstart-recovery after compaction
-.autoprep  created by statusline at the 85% threshold (if no .autoprepped)
-           consumed by userpromptsubmit-notify → injects save-now directive,
-           writes .autoprepped and .warned, removes any .warn
-.autoprepped  cooldown; deleted by sessionstart-recovery after compaction
+.autoprep  created by statusline at the autoprep tier (if no .autoprepped,
+           or usage grew past it by the rearm distance)
+           consumed by stop-autoprep (end of turn) or userpromptsubmit-notify
+           → save-now directive, writes .autoprepped and .warned, removes .warn
+.autoprepped  cooldown holding tokens=N at the save; re-arms at N + rearm;
+              deleted by sessionstart-recovery after compaction
 .autocompact  created by precompact-backup on trigger=auto
               consumed by sessionstart-recovery → harsher skepticism
 <sid>.md   created by /compact-prep (manually or via the directive)
@@ -138,9 +157,10 @@ rules, the state file.
 **…have a hook run /compact-prep automatically?** In the useful sense, v0.2
 does: past the autoprep threshold, the prompt hook injects a directive and the
 session writes its own state file before continuing — automation without a
-second LLM call. What a hook still cannot do is act *between* prompts: a
-mid-turn auto-compact never passes a prompt boundary, which is why the
-mechanical PreCompact snapshot exists as the floor.
+second LLM call. Since v0.3 the Stop hook also covers the gap between turns,
+so a session left idle saves first. What a hook still cannot do is act
+mid-turn: an auto-compact landing inside a long turn passes neither boundary,
+which is why the mechanical PreCompact snapshot exists as the floor.
 
 **…call an LLM to write the state file (compact-plus's approach)?** If you
 want zero-touch state files, that is exactly what compact-plus offers. The
@@ -169,12 +189,14 @@ project trees means they can never end up in a commit.
 - **State file > 8KB:** truncated at injection. The headings put the
   highest-value content (decisions, recovery notes) where truncation hits last
   in practice; still, keep state files terse.
-- **Mid-turn auto-compact:** the auto-prep directive needs a prompt boundary
-  to fire; a compaction landing mid-turn gets the mechanical snapshot instead.
+- **Mid-turn auto-compact:** the auto-prep directive needs a turn boundary
+  (end of turn or next prompt) to fire; a compaction landing mid-turn gets the mechanical snapshot instead.
   Facts survive; decision structure that was never written down does not —
   prepping at natural breaks remains the only real cure.
 - **Thresholds too low/high:** defaults assume you want slack to finish a work
-  unit before compacting (60) and a last-call margin before auto-compact (85).
-  Tune with `CC_PARACHUTE_THRESHOLD` and `CC_PARACHUTE_AUTOPREP_THRESHOLD`.
+  unit before compacting (60% / 150k) and a last-call margin before compaction
+  (85% / 180k). Tune with `CC_PARACHUTE_THRESHOLD`, `CC_PARACHUTE_WARN_TOKENS`,
+  `CC_PARACHUTE_AUTOPREP_THRESHOLD`, `CC_PARACHUTE_AUTOPREP_TOKENS`, and
+  `CC_PARACHUTE_REARM_TOKENS`.
 - **Hook input schema drift:** every jq read has a `// empty` fallback and
   every hook fails open; schema drift degrades to silence, not breakage.

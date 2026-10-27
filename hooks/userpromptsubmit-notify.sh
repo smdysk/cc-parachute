@@ -28,24 +28,12 @@ fi
 
 [[ -z "$SID" ]] && exit 0
 
-# (2) auto-prep directive: the hook knows the exact session id, so it hands
-# the model the exact state file path - no pointer lookup, no race.
-AUTOPREP_MARK="$BASE/markers/$SID.autoprep"
-if [[ -f "$AUTOPREP_MARK" ]]; then
-  PCT=$(cat "$AUTOPREP_MARK" 2>/dev/null)
-  PCT=${PCT:-"?"}
-  rm -f "$AUTOPREP_MARK" "$BASE/markers/$SID.warn" 2>/dev/null || true
-  mkdir -p "$BASE/markers" 2>/dev/null || true
-  date +%s > "$BASE/markers/$SID.autoprepped" 2>/dev/null || true
-  date +%s > "$BASE/markers/$SID.warned" 2>/dev/null || true
-  STATE_PATH="$BASE/$SID.md"
-  jq -n --arg ctx "[COMPACT PREP - ACT NOW] Context usage has reached ${PCT}%; auto-compaction is imminent.
-- FIRST, at the start of this very response, save the working state; THEN continue the user's request in the same response.
-- Write the state file to: ${STATE_PATH} (exact path for this session - no pointer lookup needed).
-- Follow the compact-prep contract: a '# Compact Prep State' title, a 'saved: <ISO time> / session: <id> / cwd: <cwd>' line, then these 8 sections in this order: ## Active Plan, ## Current Phase, ## TaskList Summary, ## Session Decisions, ## Constraints and Blockers, ## Worker Topology, ## Editing Files, ## Recovery Notes.
-- Be terse everywhere except Session Decisions (adopted/rejected, with reasons) and Recovery Notes (next single step, do-nots, unverified promises). Mark empty sections as none. Never write secrets into the file.
-- Afterwards, tell the user the state was saved and that running /compact now is safer than waiting for auto-compact." \
-    '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'
+# (2) auto-prep directive (normally already handled by the Stop hook at the
+# end of the previous turn; this catches markers armed after it ran)
+# shellcheck source=autoprep-lib.sh
+source "$(dirname "${BASH_SOURCE[0]}")/autoprep-lib.sh"
+if CTX=$(autoprep_take "$BASE" "$SID" "FIRST, at the start of this very response, save the working state; THEN continue the user's request in the same response."); then
+  jq -n --arg ctx "$CTX" '{hookSpecificOutput:{hookEventName:"UserPromptSubmit",additionalContext:$ctx}}'
   exit 0
 fi
 
@@ -53,13 +41,14 @@ fi
 WARN="$BASE/markers/$SID.warn"
 [[ -f "$WARN" ]] || exit 0
 
-PCT=$(cat "$WARN" 2>/dev/null)
+PCT=$(head -1 "$WARN" 2>/dev/null)
 PCT=${PCT:-"?"}
+TOK=$(sed -n 's/^tokens=//p' "$WARN" 2>/dev/null | head -1)
 rm -f "$WARN" 2>/dev/null || true
 mkdir -p "$BASE/markers" 2>/dev/null || true
 date +%s > "$BASE/markers/$SID.warned" 2>/dev/null || true
 
-jq -n --arg ctx "[COMPACT PREP REMINDER] Context usage has reached ${PCT}%.
+jq -n --arg ctx "[COMPACT PREP REMINDER] Context usage has reached ${PCT}% (${TOK:-?} tokens).
 - At the next natural break in the work, suggest that the user run /compact-prep and then /compact.
 - Suggest it once; do not interrupt work in progress.
 - Prefer saving state before compaction over shrinking scope or splitting the session." \

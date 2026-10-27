@@ -11,18 +11,20 @@ which phase you're in, what you promised to verify before running. Ten minutes
 after a compaction, your agent re-proposes the idea you killed an hour ago, or
 "helpfully" executes the step you had agreed to verify first.
 
-cc-parachute preserves that structure across compaction with **four small shell
-hooks and one skill**. No extra LLM calls, no API keys, no background processes.
-Automation included: past 85% usage the session is directed to save its own
-state, and a compaction that arrives with nothing saved still gets a
-mechanical facts snapshot — all of it still zero extra calls.
+cc-parachute preserves that structure across compaction with **five small shell
+hooks and one skill**. No API keys, no background processes, and no extra LLM
+calls except one short continuation when auto-prep fires.
+Automation included: past 180k tokens (or 85%) the session is directed to save
+its own state before it goes idle, and a compaction that arrives with nothing saved still gets a
+mechanical facts snapshot — a fact-only fallback with zero extra calls.
 
 ## What you get
 
 | Piece | When it runs | What it does |
 |---|---|---|
-| `statusline.sh` | continuously | `[Opus] myproject \| ctx 62% ⚠ /compact-prep` — context meter; warns at 60%, arms auto-prep at 85% |
-| `userpromptsubmit-notify.sh` | every turn | at 60%: one-shot nudge to run `/compact-prep`; at 85%: directs the session to save its own state file immediately |
+| `statusline.sh` | continuously | `[Opus] myproject \| ctx 16% 162k ⚠ /compact-prep` — context meter; warns at 150k tokens or 60%, arms auto-prep at 180k tokens or 85% |
+| `stop-autoprep.sh` | end of each turn | if auto-prep is armed, keeps the session going just long enough to save its own state before going idle |
+| `userpromptsubmit-notify.sh` | every turn | at the warn tier: one-shot nudge to run `/compact-prep`; catches an auto-prep marker armed after the turn ended |
 | `/compact-prep` skill | you invoke it (or auto-prep does) | saves a 9-heading state file: decisions, rejections, constraints, the next step |
 | `precompact-backup.sh` | at compaction | backs up the raw transcript, flags auto-compacts, and writes a mechanical facts-only snapshot if no state was saved |
 | `sessionstart-recovery.sh` | right after compaction | injects the best available state (prep > folder fallback > mechanical) plus skepticism guardrails |
@@ -58,12 +60,16 @@ so the pieces talk through tiny marker files (a marker relay):
 
 ```
 statusline.sh (renders continuously)
-   │  ctx ≥ 60% → markers/<sid>.warn        ctx ≥ 85% → markers/<sid>.autoprep
+   │  ≥150k tokens or 60% → markers/<sid>.warn
+   │  ≥180k tokens or 85% → markers/<sid>.autoprep (re-armed every +150k after a save)
+   ▼
+stop-autoprep.sh (end of the turn)
+   │  autoprep: blocks the stop once — the session writes its own state file
+   │            NOW, before it goes idle (exact path supplied by the hook)
    ▼
 userpromptsubmit-notify.sh (next prompt)
-   │  60%: one-shot reminder — suggest /compact-prep at a natural break
-   │  85%: directive — the session writes its own state file NOW, then
-   │       continues the user's request (exact path supplied by the hook)
+   │  warn: one-shot reminder — suggest /compact-prep at a natural break
+   │  autoprep armed after the stop: save first, then continue the request
    ▼
 /compact-prep (you, or the auto-prep directive)
    │  writes compact-state/<session>.md — decisions, rejections, next step
@@ -99,13 +105,14 @@ model *confidently acting on a summary that dropped the reasons*.
 
 ## Design principles
 
-- **Zero extra cost.** Your session writes its own state file via the skill —
-  and the automatic layers keep it that way: the 85% directive has the session
-  write its own state, and the compaction-time fallback is pure shell.
+- **Near-zero extra cost.** Your session writes its own state file via the skill —
+  and the automatic layers keep it that way: the auto-prep directive has the session
+  write its own state (one short continuation at the end of that turn), and the
+  compaction-time fallback is pure shell.
   No secondary LLM call, no API key, no tokens spent on summarizing the summary.
 - **Fail-open.** Every hook exits 0 no matter what. A broken marker or missing
   file degrades to "no warning", never to a blocked session.
-- **Auditable.** ~270 lines of bash across four scripts. Read all of it in ten
+- **Auditable.** ~350 lines of bash across six scripts. Read all of it in ten
   minutes before letting it near your `settings.json` (which is backed up anyway).
 - **Windows is first-class.** Developed and battle-tested on Windows 11 +
   Git Bash; CI runs the full suite on Linux, macOS, and Windows.
@@ -119,22 +126,24 @@ credit where due. The difference is philosophy:
 | | cc-parachute | compact-plus |
 |---|---|---|
 | State file author | your own session, guided by a skill | a separate LLM call (Claude/Codex backend) |
-| Cost per compaction | zero extra tokens | one LLM summarization call |
-| Unprepped auto-compact | auto-prep directive at 85% + mechanical snapshot at compaction | LLM state file |
-| Footprint | 4 shell scripts + 1 skill | full plugin |
+| Cost per compaction | no summarization call (auto-prep: one short continuation) | one LLM summarization call |
+| Unprepped auto-compact | auto-prep directive (180k tokens or 85%) + mechanical snapshot at compaction | LLM state file |
+| Footprint | 6 shell scripts + 1 skill | full plugin |
 | Windows | first-class, tested in CI | not documented |
 
 Pick compact-plus if you want an LLM-written summary of the full transcript
 and plugin packaging. Pick cc-parachute if you want first-hand state written
-by the session itself, automatic coverage of auto-compacts at zero token
-cost, and Windows as a first-class platform.
+by the session itself, automatic coverage of auto-compacts with no
+summarization call, and Windows as a first-class platform.
 
 ## FAQ
 
 **Do I have to run /compact-prep manually?**
-No — three layers cover it. At 60% you get a nudge; at 85% the session is
-directed to write its own state file immediately (still zero extra calls —
-your session does the writing, and the hook hands it the exact file path); and
+No — three layers cover it. At 150k tokens (or 60%) you get a nudge; at 180k
+(or 85%) the session is directed to write its own state file at the end of that
+turn, before it goes idle (one short continuation — your session does the
+writing, and the hook hands it the exact file path; it re-arms every +150k so
+the saved state stays fresh); and
 if compaction arrives with nothing saved, the PreCompact hook writes a
 mechanical snapshot. A deliberate `/compact-prep` at a natural break still
 produces the best state file — the automatic layers are the safety net, not
@@ -145,7 +154,7 @@ The mechanical snapshot (git status, recent messages, touched files) is
 injected with a clear facts-only label, the skepticism guardrails apply, and
 the raw transcript backup is in `~/.claude/compact-state/transcripts/` if you
 need forensics. What no fallback can recover is decision structure that was
-never written down — that is what the 85% directive exists to prevent.
+never written down — that is what the auto-prep directive exists to prevent.
 
 **Multiple sessions in the same folder?**
 Not fully supported for state saving. The session pointer names whichever
@@ -160,12 +169,21 @@ Backups rotate (5 per session, 7 days). The skill is instructed never to write
 secrets into state files.
 
 **Change the thresholds?**
-Set `CC_PARACHUTE_THRESHOLD` (default 60, the nudge) and
-`CC_PARACHUTE_AUTOPREP_THRESHOLD` (default 85, the save-now directive) in the
-environment Claude Code runs in.
+Each tier fires on whichever comes first, percent or tokens. Set these in the
+environment Claude Code runs in:
+`CC_PARACHUTE_WARN_TOKENS` (default 150000) / `CC_PARACHUTE_THRESHOLD`
+(default 60) for the nudge, `CC_PARACHUTE_AUTOPREP_TOKENS` (default 180000) /
+`CC_PARACHUTE_AUTOPREP_THRESHOLD` (default 85) for the save-now directive, and
+`CC_PARACHUTE_REARM_TOKENS` (default 150000) for how far usage must grow before
+the directive fires again.
+
+**Why tokens and not just percent?** On 1M-token windows, used percent is
+measured against the whole window, but compaction can run far earlier — idle
+compaction kicks in from about 200k tokens. Percent-only thresholds then never
+fire before compaction.
 
 **Uninstall?**
-Restore the timestamped `settings.json` backup (or remove the three hook
+Restore the timestamped `settings.json` backup (or remove the four hook
 entries and statusline), then delete `~/.claude/hooks/cc-parachute/`,
 `~/.claude/skills/compact-prep/`, and `~/.claude/compact-state/`.
 
